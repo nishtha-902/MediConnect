@@ -9,7 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Calendar } from '@/components/ui/calendar';
-import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import { supabase } from '@/integrations/supabase/client';
 import { 
   ArrowLeft, 
   ArrowRight, 
@@ -18,7 +18,8 @@ import {
   User,
   CreditCard,
   Shield,
-  CheckCircle
+  CheckCircle,
+  Loader2
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
@@ -33,6 +34,8 @@ const timeSlots = [
   '9:00 AM', '9:30 AM', '10:00 AM', '10:30 AM', '11:00 AM', '11:30 AM',
   '2:00 PM', '2:30 PM', '3:00 PM', '3:30 PM', '4:00 PM', '4:30 PM',
 ];
+
+const CONSULTATION_PRICE_ID = "price_1SqYueAbtZw9IPLK4JfXA4VQ";
 
 const BookingPage = () => {
   const { specialty } = useParams();
@@ -49,6 +52,7 @@ const BookingPage = () => {
     phone: '',
     symptoms: '',
   });
+  const [isProcessingPayment, setIsProcessingPayment] = useState(false);
 
   const specialtyName = specialty?.replace('-', ' ').replace(/\b\w/g, l => l.toUpperCase()) || 'General Medicine';
 
@@ -76,12 +80,38 @@ const BookingPage = () => {
   }
 
   const handlePayment = async () => {
-    // Simulating payment process
-    toast({
-      title: "Payment Successful!",
-      description: "Your consultation has been booked. Check your email for details.",
-    });
-    navigate('/dashboard');
+    setIsProcessingPayment(true);
+    
+    const selectedDoctorInfo = doctors.find(d => d.id === selectedDoctor);
+    
+    try {
+      const { data, error } = await supabase.functions.invoke('create-payment', {
+        body: {
+          priceId: CONSULTATION_PRICE_ID,
+          doctorName: selectedDoctorInfo?.name,
+          specialty: specialtyName,
+          appointmentDate: selectedDate?.toLocaleDateString(),
+          appointmentTime: selectedTime,
+        },
+      });
+
+      if (error) throw error;
+
+      if (data?.url) {
+        // Redirect to Stripe checkout
+        window.location.href = data.url;
+      } else {
+        throw new Error('No checkout URL received');
+      }
+    } catch (error: any) {
+      console.error('Payment error:', error);
+      toast({
+        title: "Payment Error",
+        description: error.message || "Failed to initiate payment. Please try again.",
+        variant: "destructive",
+      });
+      setIsProcessingPayment(false);
+    }
   };
 
   const renderStep = () => {
@@ -218,7 +248,7 @@ const BookingPage = () => {
                       id="phone"
                       value={patientInfo.phone}
                       onChange={(e) => setPatientInfo({ ...patientInfo, phone: e.target.value })}
-                      placeholder="+1 (555) 000-0000"
+                      placeholder="+91 9876543210"
                     />
                   </div>
                 </div>
@@ -287,52 +317,24 @@ const BookingPage = () => {
                 </div>
                 <div className="flex justify-between py-4 text-lg">
                   <span className="font-semibold">Total</span>
-                  <span className="font-bold text-primary">$49.00</span>
+                  <span className="font-bold text-primary">₹499.00</span>
                 </div>
               </CardContent>
             </Card>
 
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <CreditCard className="h-5 w-5" />
-                  Payment Method
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <RadioGroup defaultValue="card" className="space-y-3">
-                  <div className="flex items-center space-x-3 p-4 rounded-lg border hover:bg-muted/50 cursor-pointer">
-                    <RadioGroupItem value="card" id="card" />
-                    <Label htmlFor="card" className="flex-1 cursor-pointer">
-                      <span className="font-medium">Credit/Debit Card</span>
-                      <p className="text-sm text-muted-foreground">Visa, Mastercard, Amex</p>
-                    </Label>
-                  </div>
-                  <div className="flex items-center space-x-3 p-4 rounded-lg border hover:bg-muted/50 cursor-pointer">
-                    <RadioGroupItem value="upi" id="upi" />
-                    <Label htmlFor="upi" className="flex-1 cursor-pointer">
-                      <span className="font-medium">UPI</span>
-                      <p className="text-sm text-muted-foreground">Google Pay, PhonePe, Paytm</p>
-                    </Label>
-                  </div>
-                </RadioGroup>
-
-                <div className="mt-6 space-y-4">
-                  <div className="space-y-2">
-                    <Label>Card Number</Label>
-                    <Input placeholder="1234 5678 9012 3456" />
-                  </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label>Expiry Date</Label>
-                      <Input placeholder="MM/YY" />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>CVV</Label>
-                      <Input placeholder="123" type="password" />
-                    </div>
+            <Card className="border-primary/20 bg-primary/5">
+              <CardContent className="p-6">
+                <div className="flex items-center gap-3 mb-4">
+                  <CreditCard className="h-6 w-6 text-primary" />
+                  <div>
+                    <h3 className="font-semibold text-foreground">Secure Payment</h3>
+                    <p className="text-sm text-muted-foreground">Powered by Stripe - Cards & UPI accepted</p>
                   </div>
                 </div>
+                <p className="text-sm text-muted-foreground">
+                  You will be redirected to Stripe's secure checkout page to complete your payment. 
+                  A confirmation email will be sent after successful payment.
+                </p>
               </CardContent>
             </Card>
           </div>
@@ -396,6 +398,7 @@ const BookingPage = () => {
             <Button 
               variant="outline" 
               onClick={() => step > 1 ? setStep(step - 1) : navigate('/specialties')}
+              disabled={isProcessingPayment}
             >
               <ArrowLeft className="h-4 w-4 mr-2" />
               {step > 1 ? 'Back' : 'Cancel'}
@@ -413,10 +416,19 @@ const BookingPage = () => {
               <Button 
                 variant="hero"
                 onClick={handlePayment}
-                disabled={!canProceed()}
+                disabled={!canProceed() || isProcessingPayment}
               >
-                Pay $49.00
-                <CreditCard className="h-4 w-4 ml-2" />
+                {isProcessingPayment ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Processing...
+                  </>
+                ) : (
+                  <>
+                    Pay ₹499.00
+                    <CreditCard className="h-4 w-4 ml-2" />
+                  </>
+                )}
               </Button>
             )}
           </div>
