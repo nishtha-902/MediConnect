@@ -10,6 +10,13 @@ import Dashboard from "./pages/Dashboard";
 import SpecialtiesPage from "./pages/SpecialtiesPage";
 import BookingPage from "./pages/BookingPage";
 import ConsultationPage from "./pages/ConsultationPage";
+import AppointmentsPage from "./pages/AppointmentsPage";
+import MedicalRecordsPage from "./pages/MedicalRecordsPage";
+import SettingsPage from "./pages/SettingsPage";
+import HowItWorksPage from "./pages/HowItWorksPage";
+import AboutPage from "./pages/AboutPage";
+import PaymentSuccessPage from "./pages/PaymentSuccessPage";
+import PaymentCancelledPage from "./pages/PaymentCancelledPage";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -28,6 +35,13 @@ const App = () => (
             <Route path="/specialties" element={<SpecialtiesPage />} />
             <Route path="/booking/:specialty" element={<BookingPage />} />
             <Route path="/consultation/:id" element={<ConsultationPage />} />
+            <Route path="/appointments" element={<AppointmentsPage />} />
+            <Route path="/records" element={<MedicalRecordsPage />} />
+            <Route path="/settings" element={<SettingsPage />} />
+            <Route path="/how-it-works" element={<HowItWorksPage />} />
+            <Route path="/about" element={<AboutPage />} />
+            <Route path="/payment-success" element={<PaymentSuccessPage />} />
+            <Route path="/payment-cancelled" element={<PaymentCancelledPage />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </BrowserRouter>
