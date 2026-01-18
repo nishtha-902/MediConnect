@@ -10,6 +10,8 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Calendar } from '@/components/ui/calendar';
 import { supabase } from '@/integrations/supabase/client';
+import BookingSuccessDialog from '@/components/BookingSuccessDialog';
+import { getDoctorsForSpecialty, Doctor } from '@/data/doctors';
 import { 
   ArrowLeft, 
   ArrowRight, 
@@ -28,13 +30,6 @@ declare global {
     Razorpay: any;
   }
 }
-
-const doctors = [
-  { id: 1, name: 'Dr. Sarah Williams', experience: '15 years', rating: 4.9, image: '/placeholder.svg' },
-  { id: 2, name: 'Dr. Michael Chen', experience: '12 years', rating: 4.8, image: '/placeholder.svg' },
-  { id: 3, name: 'Dr. Emily Rodriguez', experience: '10 years', rating: 4.9, image: '/placeholder.svg' },
-  { id: 4, name: 'Dr. James Park', experience: '8 years', rating: 4.7, image: '/placeholder.svg' },
-];
 
 const timeSlots = [
   '9:00 AM', '9:30 AM', '10:00 AM', '10:30 AM', '11:00 AM', '11:30 AM',
@@ -60,8 +55,18 @@ const BookingPage = () => {
   });
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
   const [razorpayLoaded, setRazorpayLoaded] = useState(false);
+  const [showSuccessDialog, setShowSuccessDialog] = useState(false);
+  const [bookingDetails, setBookingDetails] = useState({
+    doctorName: '',
+    specialty: '',
+    date: '',
+    time: '',
+    patientName: '',
+    paymentId: '',
+  });
 
   const specialtyName = specialty?.replace('-', ' ').replace(/\b\w/g, l => l.toUpperCase()) || 'General Medicine';
+  const doctors = getDoctorsForSpecialty(specialty);
 
   // Load Razorpay script
   useEffect(() => {
@@ -98,6 +103,74 @@ const BookingPage = () => {
       </div>
     );
   }
+
+  const saveAppointment = async (paymentId: string, doctorInfo: Doctor) => {
+    try {
+      const { error } = await supabase.from('appointments').insert({
+        user_id: user.id,
+        doctor_name: doctorInfo.name,
+        specialty: specialtyName,
+        appointment_date: selectedDate?.toISOString().split('T')[0],
+        appointment_time: selectedTime,
+        patient_name: patientInfo.fullName,
+        patient_phone: patientInfo.phone,
+        symptoms: patientInfo.symptoms,
+        payment_id: paymentId,
+        amount: CONSULTATION_AMOUNT,
+        status: 'upcoming',
+      });
+
+      if (error) throw error;
+      return true;
+    } catch (error: any) {
+      console.error('Error saving appointment:', error);
+      return false;
+    }
+  };
+
+  const sendConfirmationEmail = async (doctorInfo: Doctor) => {
+    try {
+      await supabase.functions.invoke('send-confirmation', {
+        body: {
+          email: user.email,
+          patientName: patientInfo.fullName,
+          doctorName: doctorInfo.name,
+          specialty: specialtyName,
+          appointmentDate: selectedDate?.toLocaleDateString(),
+          appointmentTime: selectedTime,
+        },
+      });
+    } catch (error) {
+      console.error('Error sending confirmation email:', error);
+    }
+  };
+
+  const scheduleReminder = async (doctorInfo: Doctor) => {
+    try {
+      // Create appointment datetime
+      const [time, period] = selectedTime.split(' ');
+      const [hours, minutes] = time.split(':').map(Number);
+      let hour24 = hours;
+      if (period === 'PM' && hours !== 12) hour24 += 12;
+      if (period === 'AM' && hours === 12) hour24 = 0;
+      
+      const appointmentDateTime = new Date(selectedDate!);
+      appointmentDateTime.setHours(hour24, minutes, 0, 0);
+
+      await supabase.functions.invoke('schedule-reminder', {
+        body: {
+          appointmentId: Date.now().toString(),
+          appointmentDateTime: appointmentDateTime.toISOString(),
+          email: user.email,
+          patientName: patientInfo.fullName,
+          doctorName: doctorInfo.name,
+          specialty: specialtyName,
+        },
+      });
+    } catch (error) {
+      console.error('Error scheduling reminder:', error);
+    }
+  };
 
   const handlePayment = async () => {
     if (!razorpayLoaded) {
@@ -154,8 +227,25 @@ const BookingPage = () => {
               throw new Error(verifyError?.message || "Payment verification failed");
             }
 
-            // Payment successful - navigate to success page
-            navigate(`/payment-success?payment_id=${response.razorpay_payment_id}&doctor=${encodeURIComponent(selectedDoctorInfo?.name || '')}&date=${encodeURIComponent(selectedDate?.toLocaleDateString() || '')}&time=${encodeURIComponent(selectedTime)}`);
+            // Save appointment to database
+            await saveAppointment(response.razorpay_payment_id, selectedDoctorInfo!);
+
+            // Send confirmation email
+            await sendConfirmationEmail(selectedDoctorInfo!);
+
+            // Schedule reminder email
+            await scheduleReminder(selectedDoctorInfo!);
+
+            // Show success dialog
+            setBookingDetails({
+              doctorName: selectedDoctorInfo?.name || '',
+              specialty: specialtyName,
+              date: selectedDate?.toLocaleDateString() || '',
+              time: selectedTime,
+              patientName: patientInfo.fullName,
+              paymentId: response.razorpay_payment_id,
+            });
+            setShowSuccessDialog(true);
           } catch (verifyErr: any) {
             console.error('Payment verification error:', verifyErr);
             toast({
@@ -475,8 +565,8 @@ const BookingPage = () => {
                   {label}
                 </span>
                 {index < 3 && (
-                  <div className={`w-12 sm:w-20 h-0.5 mx-2 ${
-                    step > index + 1 ? 'bg-primary' : 'bg-muted'
+                  <div className={`w-8 sm:w-16 h-1 mx-2 rounded ${
+                    step > index + 1 ? 'gradient-primary' : 'bg-muted'
                   }`} />
                 )}
               </div>
@@ -490,38 +580,39 @@ const BookingPage = () => {
 
           {/* Navigation Buttons */}
           <div className="flex justify-between mt-8">
-            <Button 
-              variant="outline" 
-              onClick={() => step > 1 ? setStep(step - 1) : navigate('/specialties')}
-              disabled={isProcessingPayment}
+            <Button
+              variant="outline"
+              onClick={() => step === 1 ? navigate('/specialties') : setStep(step - 1)}
+              className="gap-2"
             >
-              <ArrowLeft className="h-4 w-4 mr-2" />
-              {step > 1 ? 'Back' : 'Cancel'}
+              <ArrowLeft className="h-4 w-4" />
+              {step === 1 ? 'Back to Specialties' : 'Previous'}
             </Button>
-            
+
             {step < 4 ? (
-              <Button 
+              <Button
                 onClick={() => setStep(step + 1)}
                 disabled={!canProceed()}
+                className="gap-2"
               >
-                Continue
-                <ArrowRight className="h-4 w-4 ml-2" />
+                Next
+                <ArrowRight className="h-4 w-4" />
               </Button>
             ) : (
-              <Button 
-                variant="hero"
+              <Button
                 onClick={handlePayment}
-                disabled={!canProceed() || isProcessingPayment || !razorpayLoaded}
+                disabled={isProcessingPayment || !razorpayLoaded}
+                className="gap-2"
               >
                 {isProcessingPayment ? (
                   <>
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    <Loader2 className="h-4 w-4 animate-spin" />
                     Processing...
                   </>
                 ) : (
                   <>
-                    Pay ₹{CONSULTATION_AMOUNT}.00
-                    <CreditCard className="h-4 w-4 ml-2" />
+                    <CreditCard className="h-4 w-4" />
+                    Pay ₹{CONSULTATION_AMOUNT}
                   </>
                 )}
               </Button>
@@ -531,6 +622,12 @@ const BookingPage = () => {
       </main>
 
       <Footer />
+
+      <BookingSuccessDialog 
+        open={showSuccessDialog}
+        onOpenChange={setShowSuccessDialog}
+        bookingDetails={bookingDetails}
+      />
     </div>
   );
 };

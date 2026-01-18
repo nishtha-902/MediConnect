@@ -6,20 +6,26 @@ import Footer from '@/components/layout/Footer';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Calendar, Clock, Video, CheckCircle, XCircle, ArrowRight } from 'lucide-react';
+import { Calendar, Clock, Video, CheckCircle, XCircle, ArrowRight, Loader2 } from 'lucide-react';
+import { supabase } from '@/integrations/supabase/client';
+import { useToast } from '@/hooks/use-toast';
 
 interface Appointment {
   id: string;
-  doctor: string;
+  doctor_name: string;
   specialty: string;
-  date: string;
-  time: string;
+  appointment_date: string;
+  appointment_time: string;
   status: 'upcoming' | 'completed' | 'cancelled';
+  created_at: string;
 }
 
 const AppointmentsPage = () => {
   const { user, loading } = useAuth();
   const navigate = useNavigate();
+  const { toast } = useToast();
+  const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     if (!loading && !user) {
@@ -27,51 +33,62 @@ const AppointmentsPage = () => {
     }
   }, [user, loading, navigate]);
 
-  if (loading) {
+  useEffect(() => {
+    if (user) {
+      fetchAppointments();
+    }
+  }, [user]);
+
+  const fetchAppointments = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('appointments')
+        .select('*')
+        .eq('user_id', user?.id)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      setAppointments((data || []) as Appointment[]);
+    } catch (error: any) {
+      console.error('Error fetching appointments:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to load appointments',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  if (loading || isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
       </div>
     );
   }
 
   if (!user) return null;
 
-  // Mock data - would come from database
-  const appointments: Appointment[] = [
-    {
-      id: '1',
-      doctor: 'Dr. Sarah Williams',
-      specialty: 'General Medicine',
-      date: 'Today',
-      time: '3:00 PM',
-      status: 'upcoming',
-    },
-    {
-      id: '2',
-      doctor: 'Dr. Michael Chen',
-      specialty: 'Cardiology',
-      date: 'Tomorrow',
-      time: '10:30 AM',
-      status: 'upcoming',
-    },
-    {
-      id: '3',
-      doctor: 'Dr. Emily Brown',
-      specialty: 'Mental Health',
-      date: 'Jan 10, 2024',
-      time: '2:00 PM',
-      status: 'completed',
-    },
-    {
-      id: '4',
-      doctor: 'Dr. James Wilson',
-      specialty: 'Dermatology',
-      date: 'Jan 5, 2024',
-      time: '11:00 AM',
-      status: 'cancelled',
-    },
-  ];
+  const formatDate = (dateStr: string) => {
+    const date = new Date(dateStr);
+    const today = new Date();
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+
+    if (date.toDateString() === today.toDateString()) {
+      return 'Today';
+    } else if (date.toDateString() === tomorrow.toDateString()) {
+      return 'Tomorrow';
+    } else {
+      return date.toLocaleDateString('en-US', { 
+        month: 'short', 
+        day: 'numeric', 
+        year: 'numeric' 
+      });
+    }
+  };
 
   const getStatusIcon = (status: Appointment['status']) => {
     switch (status) {
@@ -111,7 +128,7 @@ const AppointmentsPage = () => {
               <Video className="h-6 w-6 text-primary-foreground" />
             </div>
             <div>
-              <h3 className="font-semibold text-foreground">{appointment.doctor}</h3>
+              <h3 className="font-semibold text-foreground">{appointment.doctor_name}</h3>
               <p className="text-sm text-muted-foreground">{appointment.specialty}</p>
             </div>
           </div>
@@ -121,11 +138,11 @@ const AppointmentsPage = () => {
         <div className="flex items-center gap-6 mt-4 pt-4 border-t border-border">
           <div className="flex items-center gap-2 text-muted-foreground">
             <Calendar className="h-4 w-4" />
-            <span className="text-sm">{appointment.date}</span>
+            <span className="text-sm">{formatDate(appointment.appointment_date)}</span>
           </div>
           <div className="flex items-center gap-2 text-muted-foreground">
             <Clock className="h-4 w-4" />
-            <span className="text-sm">{appointment.time}</span>
+            <span className="text-sm">{appointment.appointment_time}</span>
           </div>
         </div>
 
