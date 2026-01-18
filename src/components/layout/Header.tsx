@@ -1,7 +1,7 @@
 import { Link, useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/AuthContext';
-import { Heart, Menu, X, User, LogOut } from 'lucide-react';
+import { Heart, Menu, X, LogOut } from 'lucide-react';
 import { useState } from 'react';
 import {
   DropdownMenu,
@@ -10,6 +10,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 
 const Header = () => {
   const { user, signOut } = useAuth();
@@ -19,6 +20,16 @@ const Header = () => {
   const handleSignOut = async () => {
     await signOut();
     navigate('/');
+  };
+
+  const getUserInitial = () => {
+    if (user?.user_metadata?.full_name) {
+      return user.user_metadata.full_name.charAt(0).toUpperCase();
+    }
+    if (user?.email) {
+      return user.email.charAt(0).toUpperCase();
+    }
+    return 'U';
   };
 
   return (
@@ -49,12 +60,31 @@ const Header = () => {
           {user ? (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="outline" className="gap-2">
-                  <User className="h-4 w-4" />
-                  <span className="max-w-[150px] truncate">{user.email}</span>
+                <Button variant="ghost" className="relative h-10 w-10 rounded-full p-0">
+                  <Avatar className="h-10 w-10">
+                    <AvatarFallback className="bg-primary text-primary-foreground font-semibold">
+                      {getUserInitial()}
+                    </AvatarFallback>
+                  </Avatar>
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-56">
+                <div className="flex items-center gap-2 p-2">
+                  <Avatar className="h-8 w-8">
+                    <AvatarFallback className="bg-primary text-primary-foreground text-sm">
+                      {getUserInitial()}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div className="flex flex-col">
+                    <span className="text-sm font-medium truncate max-w-[150px]">
+                      {user.user_metadata?.full_name || 'User'}
+                    </span>
+                    <span className="text-xs text-muted-foreground truncate max-w-[150px]">
+                      {user.email}
+                    </span>
+                  </div>
+                </div>
+                <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={() => navigate('/dashboard')}>
                   Dashboard
                 </DropdownMenuItem>
@@ -117,8 +147,21 @@ const Header = () => {
             <div className="flex flex-col gap-2 pt-4 border-t border-border">
               {user ? (
                 <>
+                  <div className="flex items-center gap-2 py-2">
+                    <Avatar className="h-8 w-8">
+                      <AvatarFallback className="bg-primary text-primary-foreground text-sm">
+                        {getUserInitial()}
+                      </AvatarFallback>
+                    </Avatar>
+                    <span className="text-sm font-medium">
+                      {user.user_metadata?.full_name || user.email}
+                    </span>
+                  </div>
                   <Button variant="outline" onClick={() => { navigate('/dashboard'); setMobileMenuOpen(false); }}>
                     Dashboard
+                  </Button>
+                  <Button variant="outline" onClick={() => { navigate('/appointments'); setMobileMenuOpen(false); }}>
+                    My Appointments
                   </Button>
                   <Button variant="destructive" onClick={handleSignOut}>
                     Sign Out
