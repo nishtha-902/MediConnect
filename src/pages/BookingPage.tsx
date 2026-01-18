@@ -23,6 +23,12 @@ import {
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
+declare global {
+  interface Window {
+    Razorpay: any;
+  }
+}
+
 const doctors = [
   { id: 1, name: 'Dr. Sarah Williams', experience: '15 years', rating: 4.9, image: '/placeholder.svg' },
   { id: 2, name: 'Dr. Michael Chen', experience: '12 years', rating: 4.8, image: '/placeholder.svg' },
@@ -35,7 +41,7 @@ const timeSlots = [
   '2:00 PM', '2:30 PM', '3:00 PM', '3:30 PM', '4:00 PM', '4:30 PM',
 ];
 
-const CONSULTATION_PRICE_ID = "price_1SqYueAbtZw9IPLK4JfXA4VQ";
+const CONSULTATION_AMOUNT = 499;
 
 const BookingPage = () => {
   const { specialty } = useParams();
@@ -53,8 +59,22 @@ const BookingPage = () => {
     symptoms: '',
   });
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
+  const [razorpayLoaded, setRazorpayLoaded] = useState(false);
 
   const specialtyName = specialty?.replace('-', ' ').replace(/\b\w/g, l => l.toUpperCase()) || 'General Medicine';
+
+  // Load Razorpay script
+  useEffect(() => {
+    const script = document.createElement('script');
+    script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+    script.async = true;
+    script.onload = () => setRazorpayLoaded(true);
+    document.body.appendChild(script);
+
+    return () => {
+      document.body.removeChild(script);
+    };
+  }, []);
 
   useEffect(() => {
     if (!loading && !user) {
@@ -80,29 +100,104 @@ const BookingPage = () => {
   }
 
   const handlePayment = async () => {
+    if (!razorpayLoaded) {
+      toast({
+        title: "Payment Error",
+        description: "Payment system is loading. Please try again.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     setIsProcessingPayment(true);
     
     const selectedDoctorInfo = doctors.find(d => d.id === selectedDoctor);
     
     try {
-      const { data, error } = await supabase.functions.invoke('create-payment', {
+      // Create Razorpay order
+      const { data, error } = await supabase.functions.invoke('create-razorpay-order', {
         body: {
-          priceId: CONSULTATION_PRICE_ID,
+          amount: CONSULTATION_AMOUNT,
           doctorName: selectedDoctorInfo?.name,
           specialty: specialtyName,
           appointmentDate: selectedDate?.toLocaleDateString(),
           appointmentTime: selectedTime,
+          patientName: patientInfo.fullName,
+          patientPhone: patientInfo.phone,
         },
       });
 
       if (error) throw error;
 
-      if (data?.url) {
-        // Redirect to Stripe checkout
-        window.location.href = data.url;
-      } else {
-        throw new Error('No checkout URL received');
-      }
+      const { orderId, amount, currency, keyId } = data;
+
+      // Open Razorpay checkout
+      const options = {
+        key: keyId,
+        amount: amount,
+        currency: currency,
+        name: "MedConsult",
+        description: `${specialtyName} Consultation with ${selectedDoctorInfo?.name}`,
+        order_id: orderId,
+        handler: async function (response: any) {
+          try {
+            // Verify payment on backend
+            const { data: verifyData, error: verifyError } = await supabase.functions.invoke('verify-razorpay-payment', {
+              body: {
+                razorpay_order_id: response.razorpay_order_id,
+                razorpay_payment_id: response.razorpay_payment_id,
+                razorpay_signature: response.razorpay_signature,
+              },
+            });
+
+            if (verifyError || !verifyData?.success) {
+              throw new Error(verifyError?.message || "Payment verification failed");
+            }
+
+            // Payment successful - navigate to success page
+            navigate(`/payment-success?payment_id=${response.razorpay_payment_id}&doctor=${encodeURIComponent(selectedDoctorInfo?.name || '')}&date=${encodeURIComponent(selectedDate?.toLocaleDateString() || '')}&time=${encodeURIComponent(selectedTime)}`);
+          } catch (verifyErr: any) {
+            console.error('Payment verification error:', verifyErr);
+            toast({
+              title: "Payment Verification Failed",
+              description: verifyErr.message || "Please contact support if amount was deducted.",
+              variant: "destructive",
+            });
+          }
+          setIsProcessingPayment(false);
+        },
+        prefill: {
+          name: patientInfo.fullName,
+          email: user.email,
+          contact: patientInfo.phone,
+        },
+        notes: {
+          specialty: specialtyName,
+          doctor: selectedDoctorInfo?.name,
+          date: selectedDate?.toLocaleDateString(),
+          time: selectedTime,
+        },
+        theme: {
+          color: "#10b981",
+        },
+        modal: {
+          ondismiss: function() {
+            setIsProcessingPayment(false);
+          }
+        }
+      };
+
+      const razorpay = new window.Razorpay(options);
+      razorpay.on('payment.failed', function (response: any) {
+        console.error('Payment failed:', response.error);
+        toast({
+          title: "Payment Failed",
+          description: response.error.description || "Payment could not be completed. Please try again.",
+          variant: "destructive",
+        });
+        setIsProcessingPayment(false);
+      });
+      razorpay.open();
     } catch (error: any) {
       console.error('Payment error:', error);
       toast({
@@ -317,7 +412,7 @@ const BookingPage = () => {
                 </div>
                 <div className="flex justify-between py-4 text-lg">
                   <span className="font-semibold">Total</span>
-                  <span className="font-bold text-primary">₹499.00</span>
+                  <span className="font-bold text-primary">₹{CONSULTATION_AMOUNT}.00</span>
                 </div>
               </CardContent>
             </Card>
@@ -328,11 +423,11 @@ const BookingPage = () => {
                   <CreditCard className="h-6 w-6 text-primary" />
                   <div>
                     <h3 className="font-semibold text-foreground">Secure Payment</h3>
-                    <p className="text-sm text-muted-foreground">Powered by Stripe - Cards & UPI accepted</p>
+                    <p className="text-sm text-muted-foreground">Powered by Razorpay - Cards, UPI, Net Banking accepted</p>
                   </div>
                 </div>
                 <p className="text-sm text-muted-foreground">
-                  You will be redirected to Stripe's secure checkout page to complete your payment. 
+                  Complete your payment securely using Razorpay. You can pay via UPI, debit/credit cards, net banking, or wallets.
                   A confirmation email will be sent after successful payment.
                 </p>
               </CardContent>
@@ -416,7 +511,7 @@ const BookingPage = () => {
               <Button 
                 variant="hero"
                 onClick={handlePayment}
-                disabled={!canProceed() || isProcessingPayment}
+                disabled={!canProceed() || isProcessingPayment || !razorpayLoaded}
               >
                 {isProcessingPayment ? (
                   <>
@@ -425,7 +520,7 @@ const BookingPage = () => {
                   </>
                 ) : (
                   <>
-                    Pay ₹499.00
+                    Pay ₹{CONSULTATION_AMOUNT}.00
                     <CreditCard className="h-4 w-4 ml-2" />
                   </>
                 )}
